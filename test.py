@@ -7,192 +7,58 @@ len1, len2 = 25, 30
 
 with open("out.jl", 'w') as f:
     for line in lines:
-        if re.match(r'`BPRco', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, lwr, upr, des = re.split(r"\s*,\s*", newline, 5)
-            par = par.strip()
-            val = val.strip('\`')
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, range ({lwr}, {upr}), unit {uni}\n")
-        elif re.match(r'`BPRoc', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, lwr, upr, des = re.split(r"\s*,\s*", newline, 5)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, range ({lwr}, {upr}), unit {uni}\n")
-        elif re.match(r'`BPRoz', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, des = re.split(r"\s*,\s*", newline, 3)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, unit {uni}\n")
-        elif re.match(r'`BPRcz', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, des = re.split(r"\s*,\s*", newline, 3)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, unit {uni}\n")
-        elif re.match(r'`BPRnb', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, des = re.split(r"\s*,\s*", newline, 3)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, unit {uni}\n")
-        elif re.match(r'`BPRoo', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, lwr, upr, des = re.split(r"\s*,\s*", newline, 5)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, range ({lwr}, {upr}), unit {uni}\n")
-        elif re.match(r'`BPIcc', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, lwr, upr, des = re.split(r"\s*,\s*", newline, 5)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, range ({lwr}, {upr}), unit {uni}\n")
-        elif re.match(r'`IPIco', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, lwr, upr, des = re.split(r"\s*,\s*", newline, 5)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, range ({lwr}, {upr}), unit {uni}\n")
-        elif re.match(r'`MPRnb', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, des = re.split(r"\s*,\s*", newline, 3)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, unit {uni}\n")
-        elif re.match(r'`MPRex', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, exc, des = re.split(r"\s*,\s*", newline, 4)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, except {exc}, unit {uni}\n")
-        elif re.match(r'`MPRcc', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, lwr, upr, des = re.split(r"\s*,\s*", newline, 5)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, range ({lwr}, {upr}), unit {uni}\n")
-        elif re.match(r'`MPRoo', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, lwr, upr, des = re.split(r"\s*,\s*", newline, 5)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, range ({lwr}, {upr}), unit {uni}\n")
-        elif re.match(r'`MPRco', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, lwr, upr, des = re.split(r"\s*,\s*", newline, 5)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, range ({lwr}, {upr}), unit {uni}\n")
-        elif re.match(r'`MPRcz', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            par, val, uni, des = re.split(r"\s*,\s*", newline, 3)
-            par = par.strip()
-            des = des.strip().strip('\"')
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, unit {uni}\n")
-        elif re.match(r'`MPRoz', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            split = re.split(r"\s*,\s*", newline)
-            if len(split) > 4:
-                print(split)
-            par = split[0]
-            if '(' in split[1]:
-                val = split[1] + split[2]
-            # par, val, uni, des = [
-            #     x.strip().strip('\"').strip('\`')
-            #     for x in split
-            # ]            
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, unit {uni}\n")
-        elif re.match(r'`MPIcc', line):
-            newline = line[line.find("(")+1 : line.rfind(")")]
-            split = re.split(r"\s*,\s*", newline, 5)
-            par, val, uni, lwr, upr, des = [
-                x.strip().strip('\"').strip('\`')
-                for x in split
-            ]
-            assign = f"{par} = {val}"
-            if len(assign) < len1:
-                f.write(assign.ljust(len1))
-            else:
-                f.write(assign.ljust(len2))
-            f.write(f"# {des}, range ({lwr}, {upr}), unit {uni}\n")
+        if (re.match(r'`MPRnb', line) or 
+            re.match(r'`MPRex', line) or 
+            re.match(r'`MPRcc', line) or
+            re.match(r'`MPRoo', line) or 
+            re.match(r'`MPRco', line) or
+            re.match(r'`MPRoc', line) or 
+            re.match(r'`MPRcz', line) or
+            re.match(r'`MPRoz', line) or 
+            re.match(r'`IPRnb', line) or
+            re.match(r'`IPRex', line) or 
+            re.match(r'`IPRcc', line) or
+            re.match(r'`IPRoo', line) or 
+            re.match(r'`IPRco', line) or
+            re.match(r'`IPRoc', line) or 
+            re.match(r'`IPRcz', line) or
+            re.match(r'`IPRoz', line) or 
+            re.match(r'`BPRco', line) or
+            re.match(r'`BPRoz', line) or 
+            re.match(r'`BPRcz', line) or
+            re.match(r'`BPRnb', line)):
+            paran_1st = line.find("(")
+            comma_1st = line.find(",")
+            comma_2nd = line.find(",", comma_1st+1)
+            par = line[paran_1st+1:comma_1st].strip()
+            val = line[comma_1st+1:comma_2nd].strip()
+            f.write(f"{par}::Float64 = {val}\n")
+        elif (re.match(r'`MPInb', line) or 
+            re.match(r'`MPIex', line) or 
+            re.match(r'`MPIcc', line) or
+            re.match(r'`MPIoo', line) or 
+            re.match(r'`MPIco', line) or
+            re.match(r'`MPIoc', line) or 
+            re.match(r'`MPIcz', line) or
+            re.match(r'`MPIoz', line) or 
+            re.match(r'`MPIsw', line) or
+            re.match(r'`MPIty', line) or 
+            re.match(r'`IPInb', line) or
+            re.match(r'`IPIex', line) or 
+            re.match(r'`IPIcc', line) or
+            re.match(r'`IPIoo', line) or 
+            re.match(r'`IPIco', line) or
+            re.match(r'`IPIoc', line) or 
+            re.match(r'`IPIcz', line) or
+            re.match(r'`IPIoz', line) or 
+            re.match(r'`BPIcc', line) or
+            re.match(r'`BPInb', line)):
+            paran_1st = line.find("(")
+            comma_1st = line.find(",")
+            comma_2nd = line.find(",", comma_1st+1)
+            par = line[paran_1st+1:comma_1st].strip()
+            val = line[comma_1st+1:comma_2nd].strip()
+            f.write(f"{par}::UInt16 = {val}\n")
         elif re.match(r'//', line):
             f.write(line.replace("//", "#"))   
         else:
