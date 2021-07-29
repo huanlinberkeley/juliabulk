@@ -1,4 +1,39 @@
+DELTA_1 = 0.02
+Oneby3 = 0.33333333333333333
+REFTEMP = 300.15       # 27 degrees C
+
+# Clamped exponential function
+function lexp(x)::Float64
+	EXPL_THRESHOLD::Float64 = 80.0
+	MAX_EXPL::Float64 = 5.540622384e34
+	MIN_EXPL::Float64 = 1.804851387e-35
+	if (x > EXPL_THRESHOLD)
+		return MAX_EXPL * (1.0 + x - EXPL_THRESHOLD)
+	elseif (x < -EXPL_THRESHOLD)
+		return MIN_EXPL
+	else
+		return exp(x)
+	end
+end
+
+# Clamped log function
+function lln(x)::Float64
+	N_MINLOG::Float64 = 1.0e-38
+	return log(max(x, N_MINLOG))
+end
+
+# Hyperbolic smoothing function
+function hypsmooth(x, c)::Float64
+    return 0.5 * (x + sqrt(x * x + 4.0 * c * c))
+end
+
 function bsimbulk()
+	ntype::Int8 = 1
+	ptype::Int8 = -1
+	q::Float64 = 1.60219e-19
+	EPS0::Float64 = 8.85418e-12
+	KboQ::Float64 = 8.617087e-5      # Joule/degree
+
 	# Pure instance parameters
 	L::Float64 = 1.0e-5
 	W::Float64 = 1.0e-5
@@ -1128,6 +1163,36 @@ function bsimbulk()
 	DRII1::Float64 = 1.0
 	DRII2::Float64 = 5
 	DELTAII::Float64 = 0.5
+
+
+	# Bias-independent calculations
+    if (TYPE == ntype)
+        devsign = 1
+    else
+        devsign = -1
+    end
+
+    # Constants
+    epssi    = EPSRSUB * EPS0
+    epsox    = EPSROX * EPS0
+    Cox      = EPSROX * EPS0 / TOXE
+    epsratio = EPSRSUB / EPSROX
+
+    # Physical oxide thickness
+    #if not_given(TOXP) 
+    #    BSIMBULKTOXP = (TOXE * EPSROX / 3.9) - DTOX
+    #else 
+        BSIMBULKTOXP = TOXP
+    #end
+
+    L_mult = L * LMLT
+    W_mult = W * WMLT
+    Lnew = L_mult + XL
+    W_by_NF = W_mult / NF
+    Wnew    = W_by_NF + XW
+
+
+
 	AIGC
 end
 
