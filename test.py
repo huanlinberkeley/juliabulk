@@ -5,7 +5,7 @@ with open("param.txt", 'r') as f:
 
 len1, len2 = 25, 30
 
-with open("out.jl", 'w') as f:
+with open("out_bk.jl", 'w') as f:
     for line in lines:
         if (re.match(r'`MPRnb', line) or 
             re.match(r'`MPRex', line) or 
@@ -32,7 +32,7 @@ with open("out.jl", 'w') as f:
             comma_2nd = line.find(",", comma_1st+1)
             par = line[paran_1st+1:comma_1st].strip()
             val = line[comma_1st+1:comma_2nd].strip()
-            f.write(f"{par}::Float64 = {val}\n")
+            f.write(f"{par}::Float64 = get(param, \"{par}\", {val})\n")
         elif (re.match(r'`MPInb', line) or 
             re.match(r'`MPIex', line) or 
             re.match(r'`MPIcc', line) or
@@ -58,7 +58,7 @@ with open("out.jl", 'w') as f:
             comma_2nd = line.find(",", comma_1st+1)
             par = line[paran_1st+1:comma_1st].strip()
             val = line[comma_1st+1:comma_2nd].strip()
-            f.write(f"{par}::UInt16 = {val}\n")
+            f.write(f"{par}::UInt8 = get(param, \"{par}\", {val})\n")
         elif re.match(r'//', line):
             f.write(line.replace("//", "#"))   
         else:
