@@ -16,6 +16,11 @@ function lexp(x)::Float64
 	end
 end
 
+# Power function
+function pow(x, y)::Float64
+	return x^y
+end
+
 # Clamped log function
 function lln(x)::Float64
 	N_MINLOG::Float64 = 1.0e-38
@@ -27,7 +32,11 @@ function hypsmooth(x, c)::Float64
     return 0.5 * (x + sqrt(x * x + 4.0 * c * c))
 end
 
-param = Dict("L" => 1e-6, "TOXP" => 1e-9)
+param = Dict(
+	"L" => 1e-6, 
+	"TOXP" => 1e-9,
+	"Temp" => 25.0
+	)
 
 function bsimbulk(param)
 	ntype::Int8 = 1
@@ -35,6 +44,14 @@ function bsimbulk(param)
 	q::Float64 = 1.60219e-19
 	EPS0::Float64 = 8.85418e-12
 	KboQ::Float64 = 8.617087e-5      # Joule/degree
+	P_CELSIUS0::Float64 = 273.15
+
+	# Bias and temperature
+	Vd::Float64 = get(param, "Vd", 1.0)
+	Vg::Float64 = get(param, "Vg", 1.0)
+	Vs::Float64 = get(param, "Vs", 0.0)
+	Vb::Float64 = get(param, "Vb", 0.0)
+	Temp::Float64 = get(param, "Temp", 25.0)
 
 	# Pure instance parameters
 	L::Float64 = get(param, "L", 1.0e-5)
@@ -1890,18 +1907,8 @@ function bsimbulk(param)
 	else 
 		Tnom = TNOM + P_CELSIUS0
 	end
-	DevTemp = $temperature + DTEMP
+	DevTemp = Temp + P_CELSIUS0 + DTEMP
 	
-	# Calculate temperature dependent values for self-heating effects
-	if ((SHMOD != 0) && (RTH0 > 0.0) && (Weff_SH > 0.0)) 
-		delTemp1 = Temp(t)
-	else 
-		delTemp1 = 0.0
-	end
-	DevTemp    = delTemp1 + DevTemp
-	T_DELTA_SH = Temp(t)
-	T_TOTAL_K  = DevTemp
-	T_TOTAL_C  = DevTemp - P_CELSIUS0
 	Vt         = KboQ * DevTemp
 	inv_Vt     = 1.0 / Vt
 	TRatio     = DevTemp / Tnom
@@ -2035,7 +2042,7 @@ function bsimbulk(param)
 	
 	# Effective S/D junction area and perimeters
 	BSIMBULKPAeffGeo(NF, GEOMOD, MINZ, Weffcj, DMCGeff, DMCIeff, DMDGeff, temp_PSeff, temp_PDeff, temp_ASeff, temp_ADeff)
-	if ($param_given(AS)) 
+	if "AS" in keys(param) 
 		ASeff = AS * WMLT * LMLT
 	else 
 		ASeff = temp_ASeff
@@ -2044,7 +2051,7 @@ function bsimbulk(param)
 		println("Warning: (instance %M) ASeff = %e is negative. Set to 0.0.", ASeff)
 		ASeff = 0.0
 	end
-	if ($param_given(AD)) 
+	if "AD" in keys(param) 
 		ADeff = AD * WMLT * LMLT
 	else 
 		ADeff = temp_ADeff
@@ -2053,7 +2060,7 @@ function bsimbulk(param)
 		println("Warning: (instance %M) ADeff = %e is negative. Set to 0.0.", ADeff)
 		ADeff = 0.0
 	end
-	if ($param_given(PS)) 
+	if "PS" in keys(param) 
 		if (PERMOD == 0) 
 			# PS does not include gate-edge perimeters
 			PSeff = PS * WMLT
@@ -2068,7 +2075,7 @@ function bsimbulk(param)
 			PSeff = 0.0
 		end
 	end
-	if ($param_given(PD)) 
+	if "PD" in keys(param) 
 		if (PERMOD == 0) 
 			# PD does not include gate-edge perimeters
 			PDeff = PD * WMLT
@@ -2188,8 +2195,8 @@ function bsimbulk(param)
 		local_sca = SCA
 		local_scb = SCB
 		local_scc = SCC
-		if (!$param_given(SCA) && !$param_given(SCB) && !$param_given(SCC)) 
-			if($param_given(SC) && SC > 0.0) 
+		if !("SCA" in keys(param)) && !("SCB" in keys(param)) && !("SCC" in keys(param)) 
+			if ("SC" in keys(param)) && (SC > 0.0) 
 				T1        = SC + Wdrn
 				T2        = 1.0 / SCREF
 				local_sca = SCREF * SCREF / (SC * T1)
@@ -2198,7 +2205,7 @@ function bsimbulk(param)
 				local_scc = ((0.05 * SC + 0.0025 * SCREF) * lexp(-20.0 * SC * T2)  - (0.05 * T1 + 0.0025 * SCREF) *
 							lexp(-20.0 * T1 * T2)) / Wdrn
 			else 
-				STROBE("Warning: (Instance %M) No WPE as none of SCA, SCB, SCC, SC is given and/or SC not positive.")
+				println("Warning: (Instance %M) No WPE as none of SCA, SCB, SCC, SC is given and/or SC not positive.")
 			end
 		end
 	end
@@ -2209,27 +2216,24 @@ function bsimbulk(param)
 	K2_i      = K2_i + k2_well
 	
 	# Load terminal voltages
-	Vg            = devsign * V(gi, bi)
-	Vd            = devsign * V(di, bi)
-	Vs            = devsign * V(si, bi)
 	Vds           = Vd - Vs
 	Vds_noswap    = Vds
 	Vsb_noswap    = Vs
 	Vdb_noswap    = Vd
-	Vbs_jct       = devsign * V(sbulk, si)
-	Vbd_jct       = devsign * V(dbulk, di)
+	Vbs_jct       = devsign * (Vb - Vs)
+	Vbd_jct       = devsign * (Vb - Vd)
 	Vgd_noswap    = Vg - Vd
 	Vgs_noswap    = Vg - Vs
-	Vgd_ov_noswap = devsign * V(gm, di)
-	Vgs_ov_noswap = devsign * V(gm, si)
+	Vgd_ov_noswap = devsign * (Vg - Vd)
+	Vgs_ov_noswap = devsign * (Vg - Vs)
 	
 	# Terminal voltage conditioning
 	# Source-drain interchange
 	sigvds = 1.0
 	if (Vds < 0.0) 
 		sigvds = -1.0
-		Vd = devsign * V(si, bi)
-		Vs = devsign * V(di, bi)
+		Vd = devsign * Vs
+		Vs = devsign * Vd
 	end
 	Vds  = Vd - Vs
 	T0   = AVDSX * Vds
@@ -2702,19 +2706,14 @@ function bsimbulk(param)
 		Rsource = Rsource + rdrift_s  
 	end
 	
-	QIOV  = 0
-	QBOV  = 0
-	QIOVS = 0
-	QBOVS = 0
-	
 	# CV calculations for HVMOD
 	if (RDSMOD == 1 && HVCAP == 1 && HVMOD == 1) 
-		vgfbdrift = -devsign * V(gm,di) - VFBOV 
+		vgfbdrift = -devsign * (Vg - Vd) - VFBOV 
 		vgfbdrift = vgfbdrift/Vt
 		gamhv     = sqrt(2.0 * q * epssi * NDR * inv_Vt) / Cox
 		phibHV    = lln(NDR / ni)
 		PO_psip(vgfbdrift,gamhv,0,phibHV,psip_k)
-		BSIM_q(psip_k, phibHV, devsign *V(di,bi)/Vt, gamhv, q_k)
+		BSIM_q(psip_k, phibHV, devsign * (Vd - Vb) / Vt, gamhv, q_k)
 	
 		# calculate nq for the drift region
 		Smooth(psip_k, 1.0, 2.0, psipclamp_hv)
@@ -2740,10 +2739,10 @@ function bsimbulk(param)
 		# For symmetric device, adding contribution of the source side drift region
 	
 		if (HVCAPS == 1) 
-			vgfbdrift = -devsign * V(gm,si) - VFBOV 
+			vgfbdrift = -devsign * (Vg - Vs) - VFBOV 
 			vgfbdrift = vgfbdrift/Vt
 			PO_psip(vgfbdrift,gamhv,0,phibHV,psip_k)
-			BSIM_q(psip_k, phibHV, devsign * V(si,bi)/Vt, gamhv, q_k)           
+			BSIM_q(psip_k, phibHV, devsign * (Vs - Vb) / Vt, gamhv, q_k)           
 	
 			Smooth(psip_k, 1.0, 2.0, psipclamp_hv)
 			sqrtpsip_k = sqrt(psipclamp_hv)
@@ -2796,7 +2795,7 @@ function bsimbulk(param)
 		Smooth(Nextra, 0, DELTAII, Nextra)
 		Nextra = NDRIFTD * Nextra
 	
-		Smooth(devsign * V(d,bi) - Vdseff - DRII2, 0, 0.05, T2)
+		Smooth(devsign * (Vd - Vb) - Vdseff - DRII2, 0, 0.05, T2)
 		T3 = 2.0 * q /(EPSRSUB * EPS0) * Nextra
 		T3 = T3 * T2                             
 	
@@ -3088,10 +3087,10 @@ function bsimbulk(param)
 	if (SSLMOD != 0) 
 		T1 = pow(NDEP_i / 1.0e23, SSLEXP1)
 		T2 = pow(300.0 / DevTemp, SSLEXP2)
-		T3 = (devsign*SSL5 * V(bi,si)) / Vt         
+		T3 = (devsign * SSL5 * (Vb - Vs)) / Vt         
 		SSL0_NT  = SSL0 * lexp(-T1 * T2)
 		SSL1_NT  = SSL1 * T2 * T1
-		PHIB_SSL = SSL3 * tanh(lexp(devsign * SSL4 * (V(gi, bi) - VTH - V(si,bi))))
+		PHIB_SSL = SSL3 * tanh(lexp(devsign * SSL4 * ((Vg - Vb) - VTH - (Vs - Vb))))
 		Issl     = sigvds * NF * Weff * SSL0_NT * lexp(T3) * lexp(-SSL1_NT * Leff) * lexp(PHIB_SSL / Vt) * (lexp(SSL2 * Vdsx / Vt) - 1.0)
 		I(di, si) <+ devsign * Issl
 	end
@@ -3412,7 +3411,7 @@ function bsimbulk(param)
 		T2    = sqrt(1.0 - 4.0 * Vgdov / CKAPPAD_i)
 		Qovd  = -Wact * NF * (Cgdof * Vgd_ov_noswap + CGDL_i * (Vgd_ov_noswap - Vfbsdr - Vgdov - 0.5 * CKAPPAD_i * (-1.0 + T2)))
 	end
-	Qovb = -devsign * NF * Lact * CGBO * V(gm, bi)
+	Qovb = -devsign * NF * Lact * CGBO * (Vg - Vb)
 	Qovg = -(Qovs + Qovd + Qovb)
 		
 	# Edge FET model
