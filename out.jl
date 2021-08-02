@@ -1,7 +1,3 @@
-DELTA_1 = 0.02
-Oneby3 = 0.33333333333333333
-REFTEMP = 300.15       # 27 degrees C
-
 # Clamped exponential function
 function lexp(x)::Float64
 	EXPL_THRESHOLD::Float64 = 80.0
@@ -21,6 +17,16 @@ function pow(x, y)::Float64
 	return x^y
 end
 
+# Smoothing function for (max of x, x0 with deltax)
+function Smooth(x, x0, deltax)::Float64 
+    return 0.5 * (x + x0 + sqrt((x - x0) * (x - x0) + 0.25 * deltax * deltax))
+end
+
+# Smoothing function for (min of x, x0 with deltax)
+function Smooth2(x, x0, deltax)::Float64
+    return 0.5 * (x + x0 - sqrt((x - x0) * (x - x0) + 0.25 * deltax * deltax)) + 0.25 * deltax
+end
+
 # Clamped log function
 function lln(x)::Float64
 	N_MINLOG::Float64 = 1.0e-38
@@ -32,11 +38,398 @@ function hypsmooth(x, c)::Float64
     return 0.5 * (x + sqrt(x * x + 4.0 * c * c))
 end
 
-param = Dict(
-	"L" => 1e-6, 
-	"TOXP" => 1e-9,
-	"Temp" => 25.0
-	)
+# Junction capacitance macro between S/D and bulk
+function JunCap(Czbx, Vbx_jct, PBX_t, MJX, czbx_p1, czbx_p2)::Float64
+    if (Czbx > 0.0) 
+        T1 = Vbx_jct / PBX_t
+        if (T1 < 0.9) 
+            arg = 1.0 - T1
+            if (MJX == 0.5) 
+                sarg = 1.0 / sqrt(arg)
+            else 
+                sarg = lexp(-MJX * lln(arg))
+            end 
+            return PBX_t * Czbx * (1.0 - arg * sarg) / (1.0 - MJX)
+        else 
+            T2 = czbx_p1 * (T1 - 1.0) * (5.0 * MJX * (T1 - 1.0) + (1.0 + MJX))
+            return PBX_t * Czbx * (T2 + czbx_p2)
+        end
+    else
+        return 0.0
+	end
+end 
+
+# Normalized pinch-off voltage including PD
+function PO_psip(vg_vfb, gamma, DPD, phif)::Float64
+	M_SQRT2::Float64 = 1.41421356237309504880
+    T1       = 1.0 + DPD
+    vgfbPD   = vg_vfb / T1
+    gammaPD  = gamma / T1
+    T1       = 0.5 * vgfbPD - 3.0 * (1.0 + gammaPD / M_SQRT2)
+    T2       = T1 + sqrt(T1 * T1 + 6.0 * vgfbPD)
+    if (vgfbPD < 0.0) 
+        T3   = (vgfbPD - T2) / gammaPD
+        return -lln(1.0 - T2 + T3 * T3)
+    else 
+        T3   = lexp(-T2)
+        T1   = 0.5 * gammaPD
+        T2   = sqrt(vgfbPD - 1.0 + T3 + T1 * T1) - T1
+        return T2 * T2 + 1.0 - T3
+    end
+end
+
+# Normalized charge-voltage relationship
+function BSIM_q(psip, phib, vch, gam)::Float64
+    T8 = 0.5 * (psip + 1.0 + sqrt((psip - 1.0) * (psip - 1.0) + 0.25 * 2.0 * 2.0))
+    sqrtpsip = sqrt(T8)
+    T9 = 1.0 + gam / (2.0 * sqrtpsip)
+    T0 = (1.0 + (gam / (2.0 * sqrtpsip))) / gam
+    T1 = psip - 2.0 * phib - vch
+    T2 = T1 - lln(4.0 * T0 * sqrtpsip)
+    T8 = 0.5 * (T2 - 0.201491 - sqrt(T2 * (T2 + 0.402982) + 2.446562))
+    sqrtpsisa = sqrtpsip
+    if (T8 <= -68.0) 
+        T4 = -100.0
+        T5 = 20.0
+        if (T8 < T4 - 0.5 * T5) 
+            T3 = lexp(T4)
+        else 
+            if (T8 > T4 + 0.5 * T5) 
+                T3 = lexp(T8)
+            else 
+                T2 = (T8 - T4) / T5
+                T6 = T2 * T2
+                T3 = lexp(T4 + T5 * ((5.0 / 64.0) + 0.5 * T2 + T6 * ((15.0 / 16.0) - T6 * (1.25 - T6))))
+            end 
+        end 
+        return T3 * (1.0 + T1 - T8 - lln(2.0 * T0 * (T3 * 2.0 * T0 + 2.0 * sqrtpsisa)))
+    else 
+        T3 = lexp(T8)
+        sqrtpsisainv = 1.0 / sqrtpsisa
+        T4 = 2.0 * T3 + lln(T3 * 2.0 * T0 * (T3 *  2.0 * T0 + 2.0 * sqrtpsisa)) - T1
+        T5 = 2.0 + (1.0 / T3) + (T0 + sqrtpsisainv) / (T0 * T3 + sqrtpsisa)
+        T3 = T3 - T4 / T5
+        T4 = 2.0 * T3 + lln(T3 * 2.0 * T0 * (T3 * 2.0 * T0 + 2.0 * sqrtpsisa)) - T1
+        T5 = 2.0 + (1.0 / T3) + (T0 + sqrtpsisainv) / (T0 * T3 + sqrtpsisa)
+        T6 = ((T0 + sqrtpsisainv) / (T0 * T3 + sqrtpsisa)) * ((T0 + sqrtpsisainv) / (T0 * T3 + sqrtpsisa))
+        T7 = -((1.0 / T3) * (1.0 / T3)) - (1.0 / (sqrtpsisa * sqrtpsisa * sqrtpsisa * (T0 * T3 + sqrtpsisa))) - T6
+        return T3 - (T4 / T5) * (1.0 + T4 * T7 / (2.0 * T5 * T5))
+    end 
+end
+
+# Define GEOMOD and RGEOMOD in the modelcard
+function BSIMBULKNumFingerDiff(nf, minSD)
+    if (nf % 2) != 0
+        nuEndD = 1
+        nuIntD = 2 * max((nf - 1) / 2, 0)		
+        nuEndS = 1
+        nuIntS = nuIntD
+    else 
+        if (minSD == 1) 
+            nuEndD = 2
+            nuIntD = 2 * max((nf / 2 - 1), 0.0)
+            nuEndS = 0
+            nuIntS = nf
+        else 
+            nuEndD = 0
+            nuIntD = nf
+            nuEndS = 2
+            nuIntS = 2 * max((nf / 2 - 1), 0)
+        end
+    end
+	return nuEndD, nuIntD, nuEndS, nuIntS
+end
+
+function BSIMBULKRdsEndIso(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEnd, rgeo, SRCFLAG)::Float64
+    if (SRCFLAG == 1)
+		if (rgeo == 1) || (rgeo == 2) || (rgeo == 5)
+            if (nuEnd == 0)
+                Rend = 0.0
+            else 
+                Rend = Rsh * DMCG / (Weffcj * nuEnd)
+            end 
+		elseif (rgeo == 3) || (rgeo == 4) || (rgeo == 6)
+            if ((DMCG + DMCI) == 0.0) 
+                println("(DMCG + DMCI) can not be equal to zero")
+            end 
+            if (nuEnd == 0)
+                Rend = 0.0
+            else 
+                Rend = Rsh * Weffcj / (3.0 * nuEnd * (DMCG + DMCI))
+            end 
+		else
+            println("Warning: (instance %M) Specified RGEO = %d not matched (BSIMBULKRdsEndIso), Rend is set to zero.", rgeo)
+            Rend = 0.0
+        end 
+    else 
+		if (rgeo == 1) || (rgeo == 3) || (rgeo == 7)
+            if (nuEnd == 0) 
+                Rend = 0.0
+            else 
+                Rend = Rsh * DMCG / (Weffcj * nuEnd)
+            end 
+		elseif (rgeo == 2) || (rgeo == 4) || (rgeo == 8)		
+            if ((DMCG + DMCI) == 0.0) 
+                println("(DMCG + DMCI) can not be equal to zero")
+            end 
+            if (nuEnd == 0) 
+                Rend = 0.0
+            else 
+                Rend = Rsh * Weffcj / (3.0 * nuEnd * (DMCG + DMCI))
+            end  
+		else
+			println("Warning: (instance %M) Specified RGEO=%d not matched (BSIMBULKRdsEndIso type 2), Rend is set to zero.", rgeo)
+            Rend = 0.0
+        end 
+    end
+	return Rend
+end
+
+function BSIMBULKRdsEndSha(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEnd, rgeo, SRCFLAG)::Float64
+	if (SRCFLAG == 1) 
+		if (rgeo == 1) || (rgeo == 2) || (rgeo == 5)
+			if (nuEnd == 0) 
+				Rend = 0.0
+			else
+				Rend = Rsh * DMCG / (Weffcj * nuEnd)
+			end 
+		elseif (rgeo == 3) || (rgeo == 4) || (rgeo == 6)
+			if (DMCG == 0.0) 
+				println("DMCG can not be equal to zero")
+			end 
+			if (nuEnd == 0) 
+				Rend = 0.0
+			else 
+				Rend = Rsh * Weffcj / (6.0 * nuEnd * DMCG)
+			end 
+		else 
+			println("Warning: (instance %M) Specified RGEO = %d not matched (BSIMBULKRdsEndSha), Rend is set to zero.", rgeo)
+			Rend = 0.0
+		end 
+	else 
+		if (rgeo == 1) || (rgeo == 3) || (rgeo == 7)
+			if (nuEnd == 0) 
+				Rend = 0.0
+			else 
+				Rend = Rsh * DMCG / (Weffcj * nuEnd)
+			end 
+		elseif (rgeo == 2) || (rgeo == 4) || (rgeo == 8)
+			if (DMCG == 0.0) 
+				println("DMCG can not be equal to zero")
+			end 
+			if (nuEnd == 0) 
+				Rend = 0.0
+			else 
+				Rend = Rsh * Weffcj / (6.0 * nuEnd * DMCG)
+			end 
+		else
+			println("Warning: (instance %M) Specified RGEO=%d not matched (BSIMBULKRdsEndSha type 2), Rend is set to zero.", rgeo)
+			Rend = 0.0
+		end
+	end 
+	return Rend
+end
+
+function BSIMBULKRdseffGeo(nf, geo, rgeo, minSD, Weffcj, Rsh, DMCG, DMCI, DMDG, SRCFLAG)::Float64
+	if (geo < 9) 
+		nuEndD, nuIntD, nuEndS, nuIntS = BSIMBULKNumFingerDiff(nf, minSD) 
+		if (SRCFLAG == 1) 
+			if (nuIntS == 0) 
+				Rint = 0.0
+			else
+				Rint = Rsh * DMCG / ( Weffcj * nuIntS)
+			end 
+		else 
+			if (nuIntD == 0) 
+				Rint = 0.0
+			else 
+				Rint = Rsh * DMCG / ( Weffcj * nuIntD)
+			end 
+		end 
+	end 
+	if (geo == 0)
+		if (SRCFLAG == 1) 
+			Rend = BSIMBULKRdsEndIso(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndS, rgeo, 1) 
+		else 
+			Rend = BSIMBULKRdsEndIso(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndD, rgeo, 0)
+		end  
+	elseif (geo == 1)
+		if (SRCFLAG == 1) 
+			Rend = BSIMBULKRdsEndIso(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndS, rgeo, 1) 
+		else
+			Rend = BSIMBULKRdsEndSha(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndD, rgeo, 0) 
+		end 
+	elseif (geo == 2)
+		if (SRCFLAG == 1) 
+			Rend = BSIMBULKRdsEndSha(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndS, rgeo, 1) 
+		else 
+			Rend = BSIMBULKRdsEndIso(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndD, rgeo, 0) 
+		end 
+	elseif (geo == 3)
+		if (SRCFLAG == 1)
+			Rend = BSIMBULKRdsEndSha(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndS, rgeo, 1) 
+		else 
+			Rend = BSIMBULKRdsEndSha(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndD, rgeo, 0) 
+		end 
+	elseif (geo == 4)
+		if (SRCFLAG == 1) 
+			Rend = BSIMBULKRdsEndIso(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndS, rgeo, 1) 
+		else 
+			Rend = Rsh * DMDG / Weffcj
+		end 
+	elseif (geo == 5)
+		if (SRCFLAG == 1) 
+			Rend = BSIMBULKRdsEndSha(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndS, rgeo, 1) 
+		else 
+			if (nuEndD == 0) 
+				Rend = 0.0
+			else 
+				Rend = Rsh * DMDG / (Weffcj * nuEndD)
+			end 
+		end
+	elseif (geo == 6)
+		if (SRCFLAG == 1) 
+			Rend = Rsh * DMDG / Weffcj
+		else 
+			Rend = BSIMBULKRdsEndIso(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndD, rgeo, 0) 
+		end 
+	elseif (geo == 7)
+		if (SRCFLAG == 1) 
+			if (nuEndS == 0) 
+				Rend = 0.0
+			else 
+				Rend = Rsh * DMDG / (Weffcj * nuEndS)
+			end 
+		else
+			Rend = BSIMBULKRdsEndSha(Weffcj, Rsh, DMCG, DMCI, DMDG, nuEndD, rgeo, 0)
+		end
+	elseif (geo == 8)
+		Rend = Rsh * DMDG / Weffcj
+	elseif (geo == 9)		# all wide contacts assumed for geo = 9 and 10 
+		if (SRCFLAG == 1) 
+			Rend = 0.5 * Rsh * DMCG / Weffcj
+			if (nf == 2)
+				Rint = 0.0
+			else 
+				Rint = Rsh * DMCG / (Weffcj * (nf - 2.0))
+			end 
+		else 
+			Rend = 0.0
+			Rint = Rsh * DMCG / (Weffcj * nf)
+		end 
+	elseif (geo == 10)
+		if (SRCFLAG == 1) 
+			Rend = 0.0
+			Rint = Rsh * DMCG / (Weffcj * nf)
+		else 
+			Rend = 0.5 * Rsh * DMCG / Weffcj
+			if (nf == 2) 
+				Rint = 0.0
+			else 
+				Rint = Rsh * DMCG / (Weffcj * (nf - 2.0))
+			end 
+		end  
+	else 
+		println("Warning: (instance %M) Specified GEO=%d not matched (BSIMBULKRdseffGeo), Rint is set to zero.", geo)
+		Rint = 0.0
+	end
+	if (Rint <= 0.0) 
+		Rtot = Rend
+	elseif (Rend <= 0.0) 
+		Rtot = Rint
+	else
+		Rtot = Rint * Rend / (Rint + Rend)
+	end 
+	if (Rtot == 0.0) 
+		println("Warning: (instance %M) Zero resistance returned from RdseffGeo")
+	end 
+	return Rtot
+end
+
+# Effective PS, PD, AS, AD calculation, Ref: BSIM4
+function BSIMBULKPAeffGeo(nf, geo, minSD, Weffcj, DMCG, DMCI, DMDG)
+    if (geo < 9) 
+		nuEndD, nuIntD, nuEndS, nuIntS = BSIMBULKNumFingerDiff(nf, minSD) 
+		T0 = DMCG + DMCI
+		T1 = DMCG + DMCG
+		T2 = DMDG + DMDG
+		PSiso = T0 + T0 + Weffcj
+		PDiso = T0 + T0 + Weffcj
+		PSsha = T1
+		PDsha = T1
+		PSmer = T2
+		PDmer = T2
+		ASiso = T0 * Weffcj
+		ADiso = T0 * Weffcj
+		ASsha = DMCG * Weffcj
+		ADsha = DMCG * Weffcj
+		ASmer = DMDG * Weffcj
+		ADmer = DMDG * Weffcj
+	end
+	if (geo == 0) 
+		Ps = nuEndS * PSiso + nuIntS * PSsha
+		Pd = nuEndD * PDiso + nuIntD * PDsha
+		As = nuEndS * ASiso + nuIntS * ASsha
+		Ad = nuEndD * ADiso + nuIntD * ADsha 
+	elseif (geo == 1) 
+		Ps = nuEndS * PSiso + nuIntS * PSsha
+		Pd = (nuEndD + nuIntD) * PDsha
+		As = nuEndS * ASiso + nuIntS * ASsha
+		Ad = (nuEndD + nuIntD) * ADsha
+	elseif (geo == 2) 
+		Ps = (nuEndS + nuIntS) * PSsha
+		Pd = nuEndD * PDiso + nuIntD * PDsha
+		As = (nuEndS + nuIntS) * ASsha
+		Ad = nuEndD * ADiso + nuIntD * ADsha
+	elseif (geo == 3) 
+		Ps = (nuEndS + nuIntS) * PSsha
+		Pd = (nuEndD + nuIntD) * PDsha
+		As = (nuEndS + nuIntS) * ASsha
+		Ad = (nuEndD + nuIntD) * ADsha
+	elseif (geo == 4) 
+		Ps = nuEndS * PSiso + nuIntS * PSsha
+		Pd = nuEndD * PDmer + nuIntD * PDsha
+		As = nuEndS * ASiso + nuIntS * ASsha
+		Ad = nuEndD * ADmer + nuIntD * ADsha
+	elseif (geo == 5) 
+		Ps = (nuEndS + nuIntS) * PSsha
+		Pd = nuEndD * PDmer + nuIntD * PDsha
+		As = (nuEndS + nuIntS) * ASsha
+		Ad = nuEndD * ADmer + nuIntD * ADsha
+	elseif (geo == 6) 
+		Ps = nuEndS * PSmer + nuIntS * PSsha
+		Pd = nuEndD * PDiso + nuIntD * PDsha
+		As = nuEndS * ASmer + nuIntS * ASsha
+		Ad = nuEndD * ADiso + nuIntD * ADsha
+	elseif (geo == 7)  
+		Ps = nuEndS * PSmer + nuIntS * PSsha
+		Pd = (nuEndD + nuIntD) * PDsha
+		As = nuEndS * ASmer + nuIntS * ASsha
+		Ad = (nuEndD + nuIntD) * ADsha
+	elseif (geo == 8) 
+		Ps = nuEndS * PSmer + nuIntS * PSsha
+		Pd = nuEndD * PDmer + nuIntD * PDsha
+		As = nuEndS * ASmer + nuIntS * ASsha
+		Ad = nuEndD * ADmer + nuIntD * ADsha
+	elseif (geo == 9) 
+		Ps = PSiso + (nf - 1.0) * PSsha
+		Pd = nf * PDsha
+		As = ASiso + (nf - 1.0) * ASsha
+		Ad = nf * ADsha
+	elseif (geo == 10) 
+		Ps = nf * PSsha
+		Pd = PDiso + (nf - 1.0) * PDsha
+		As = nf * ASsha
+		Ad = ADiso + (nf - 1.0) * ADsha
+	else 
+		println("Warning: (instance %M) Specified GEO=%d not matched (BSIMBULKPAeffGeo), PS,PD,AS,AD set to zero.", geo)
+		Ps = 0
+		Pd = 0
+		As = 0
+		Ad = 0
+	end 
+	return Ps, Pd, As, Ad
+end
 
 function bsimbulk(param)
 	ntype::Int8 = 1
@@ -45,6 +438,12 @@ function bsimbulk(param)
 	EPS0::Float64 = 8.85418e-12
 	KboQ::Float64 = 8.617087e-5      # Joule/degree
 	P_CELSIUS0::Float64 = 273.15
+	Oneby3::Float64 = 0.33333333333333333
+	DELTA_1::Float64 = 0.02
+	REFTEMP::Float64 = 300.15       # 27 degrees C
+	EXPL_THRESHOLD::Float64 = 80.0
+	MAX_EXPL::Float64 = 5.540622384e34
+	M_PI::Float64 = 3.14159265358979323846
 
 	# Bias and temperature
 	Vd::Float64 = get(param, "Vd", 1.0)
@@ -2041,7 +2440,7 @@ function bsimbulk(param)
 	NJTSSWGD_t = hypsmooth(NJTSSWGD * (1.0 + TNJTSSWGD * (TRatio - 1.0)) - 0.01, 1.0e-3) + 0.01
 	
 	# Effective S/D junction area and perimeters
-	BSIMBULKPAeffGeo(NF, GEOMOD, MINZ, Weffcj, DMCGeff, DMCIeff, DMDGeff, temp_PSeff, temp_PDeff, temp_ASeff, temp_ADeff)
+	temp_PSeff, temp_PDeff, temp_ASeff, temp_ADeff = BSIMBULKPAeffGeo(NF, GEOMOD, MINZ, Weffcj, DMCGeff, DMCIeff, DMDGeff)
 	if "AS" in keys(param) 
 		ASeff = AS * WMLT * LMLT
 	else 
@@ -2200,21 +2599,24 @@ function bsimbulk(param)
 				T1        = SC + Wdrn
 				T2        = 1.0 / SCREF
 				local_sca = SCREF * SCREF / (SC * T1)
-				local_scb = ((0.1 * SC + 0.01 * SCREF) * lexp(-10.0 * SC * T2)  - (0.1 * T1 + 0.01 * SCREF) *
-							lexp(-10.0 * T1 * T2)) / Wdrn
-				local_scc = ((0.05 * SC + 0.0025 * SCREF) * lexp(-20.0 * SC * T2)  - (0.05 * T1 + 0.0025 * SCREF) *
-							lexp(-20.0 * T1 * T2)) / Wdrn
+				local_scb = ((0.1 * SC + 0.01 * SCREF) * lexp(-10.0 * SC * T2)  - (0.1 * T1 + 0.01 * SCREF) * lexp(-10.0 * T1 * T2)) / Wdrn
+				local_scc = ((0.05 * SC + 0.0025 * SCREF) * lexp(-20.0 * SC * T2)  - (0.05 * T1 + 0.0025 * SCREF) * lexp(-20.0 * T1 * T2)) / Wdrn
 			else 
 				println("Warning: (Instance %M) No WPE as none of SCA, SCB, SCC, SC is given and/or SC not positive.")
 			end
 		end
+	else
+		local_sca = 0
+		local_scb = 0
+		local_scc = 0
 	end
+	
 	vth0_well = KVTH0WE_i * (local_sca + WEB * local_scb + WEC * local_scc)
 	k2_well   = K2WE_i * (local_sca + WEB * local_scb + WEC * local_scc)
 	mu_well   = 1.0 + KU0WE_i * (local_sca + WEB * local_scb + WEC * local_scc)
 	U0_t      = U0_t * mu_well
 	K2_i      = K2_i + k2_well
-	
+
 	# Load terminal voltages
 	Vds           = Vd - Vs
 	Vds_noswap    = Vds
@@ -2240,9 +2642,9 @@ function bsimbulk(param)
 	if (T0 > EXPL_THRESHOLD) 
 	   T1 = T0
 	else 
-	   T1 = ln(1.0 + exp(T0))
+	   T1 = log(1.0 + exp(T0))
 	end
-	Vdsx = ((2.0 / AVDSX) * T1) - Vds - ((2.0 / AVDSX) * ln(2.0))
+	Vdsx = ((2.0 / AVDSX) * T1) - Vds - ((2.0 / AVDSX) * log(2.0))
 	Vbsx = -(Vs + 0.5 * (Vds - Vdsx))
 	
 	# Asymmetry model
@@ -2278,19 +2680,19 @@ function bsimbulk(param)
 	end
 	
 	# SCE, DIBL, SS degradation effects, Ref: BSIM4
-	Smooth(Phist - Vbsx, 0.05, 0.1, PhistVbs)
+	PhistVbs = Smooth(Phist - Vbsx, 0.05, 0.1)
 	sqrtPhistVbs = sqrt(PhistVbs)
 	Xdep         = T1DEP * sqrtPhistVbs
 	Cdep         = epssi / Xdep
 	cdsc         = CIT_i + NFACTOR_t + CDSCD_a * Vdsx - CDSCB_i * Vbsx
 	T1           = 1.0 + cdsc/Cox
-	Smooth(T1, 1.0, 0.05, n)
+	n = Smooth(T1, 1.0, 0.05)
 	nVt     = n * Vt
 	inv_nVt = 1.0 / nVt
 	
 	# Vth shift for DIBL
 	dVth_dibl = -(ETA0_a + ETAB_i * Vbsx) * Vdsx
-	Smooth2(dVth_dibl, 0.0, 5.0e-5, dVth_dibl)
+	dVth_dibl = Smooth2(dVth_dibl, 0.0, 5.0e-5)
 	
 	# Vth shift with temperature
 	dvth_temp = (KT1_i + KT1L / Leff + KT2_i * Vbsx) * (pow(TRatio, KT1EXP) - 1.0)
@@ -2337,24 +2739,24 @@ function bsimbulk(param)
 	
 	# psip: pinch-off voltage
 	phib_n = phib / n
-	PO_psip(vgfb, gam, 0.0, phib_n, psip)
+	psip = PO_psip(vgfb, gam, 0.0, phib_n)
 	
 	# Normalized inversion charge at source end of channel
-	BSIM_q(psip, phib_n, vs, gam, qs)
+	qs = BSIM_q(psip, phib_n, vs, gam)
 	
 	# Average charge-surface potential slope, Ref: Charge-based MOS Transistor Modeling by C. Enz & E. Vittoz
-	Smooth(psip, 1.0, 2.0, psipclamp)
+	psipclamp = Smooth(psip, 1.0, 2.0)
 	sqrtpsip = sqrt(psipclamp)
 	
 	# Source side surface potential
 	psiavg = psip - 2.0 * qs
-	Smooth(psiavg, 1.0, 2.0, T0)
+	T0 = Smooth(psiavg, 1.0, 2.0)
 	nq = 1.0 + gam / (sqrtpsip + sqrt(T0))
 	
 	# Drain saturation voltage
 	EeffFactor = 1.0e-8 / (epsratio * TOXE)
 	T0 = nVt * (vgfb - psip - 2.0 * qs * (nq - 1.0))
-	Smooth(T0, 0.0, 0.1, qbs)
+	qbs = Smooth(T0, 0.0, 0.1)
 	
 	# Source side qi and qb for Vdsat- normalized to Cox
 	qis = 2.0 * nq * nVt * qs
@@ -2364,7 +2766,7 @@ function bsimbulk(param)
 	T2 = pow(0.5 * (1.0 + (qis / qbs)), UCS_a)
 	T3 = (UA_a + UC_a * Vbsx) * pow(Eeffs, EU_t) + UD_a / T2
 	T4 = 1.0 + T3
-	Smooth(T4, 1.0, 0.0015, Dmobs)
+	Dmobs = Smooth(T4, 1.0, 0.0015)
 	WeffWRFactor = 1.0 / (pow(Weff * 1.0e6, WR_i) * NF)
 	
 	if (RDSMOD == 1) 
@@ -2470,16 +2872,16 @@ function bsimbulk(param)
 	
 	# Normalized charge qdeff at drain end of channel
 	# Vdssat clamped to avoid negative values during transient simulation
-	Smooth(Vdsat - Vs, 0.0, 1.0e-3, Vdssat)
+	Vdssat = Smooth(Vdsat - Vs, 0.0, 1.0e-3)
 	T7      = pow(Vds / Vdssat , 1.0 / DELTA_t)
 	T8      = pow(1.0 + T7, -DELTA_t)
 	Vdseff  = Vds * T8
 	vdeff   = (Vdseff + Vs) * inv_nVt
-	BSIM_q(psip, phib_n, vdeff, gam, qdeff)
+	qdeff = BSIM_q(psip, phib_n, vdeff, gam)
 	
 	# Reevaluation of nq to include qdeff
 	psiavg = psip - qs - qdeff -1.0
-	Smooth(psiavg, 1.0, 2.0, T0)
+	T0 = Smooth(psiavg, 1.0, 2.0)
 	T2 = sqrt(T0)
 	nq = 1.0 + gam / (sqrtpsip + T2)
 	
@@ -2495,14 +2897,14 @@ function bsimbulk(param)
 	
 	# Mobility degradation, Ref: BSIM4
 	# Average charges (qba and qia) - normalized to Cox
-	Smooth(nVt * Qb, 0.0, 0.1, qba)
+	qba = Smooth(nVt * Qb, 0.0, 0.1)
 	qia   = nVt * (Qs + Qd)
 	
 	Eeffm = EeffFactor * (qba + eta_mu * qia)
 	T2    = pow(0.5 * (1.0 + (qia / qba)), UCS_a)
 	T3    = (UA_a + UC_a * Vbsx) * pow(Eeffm, EU_t) + UD_a / T2
 	T4    = 1.0 + T3
-	Smooth(T4, 1.0, 0.0015, Dmob)
+	Dmob = Smooth(T4, 1.0, 0.0015)
 	
 	# Output conductance
 	Esat  = 2.0 * VSAT_a / (U0_a / Dmob)
@@ -2712,14 +3114,14 @@ function bsimbulk(param)
 		vgfbdrift = vgfbdrift/Vt
 		gamhv     = sqrt(2.0 * q * epssi * NDR * inv_Vt) / Cox
 		phibHV    = lln(NDR / ni)
-		PO_psip(vgfbdrift,gamhv,0,phibHV,psip_k)
-		BSIM_q(psip_k, phibHV, devsign * (Vd - Vb) / Vt, gamhv, q_k)
+		psip_k = PO_psip(vgfbdrift, gamhv, 0, phibHV)
+		q_k = BSIM_q(psip_k, phibHV, devsign * (Vd - Vb) / Vt, gamhv)
 	
 		# calculate nq for the drift region
-		Smooth(psip_k, 1.0, 2.0, psipclamp_hv)
+		psipclamp_hv = Smooth(psip_k, 1.0, 2.0)
 		sqrtpsip_k = sqrt(psipclamp_hv)
 		psiavg_hv = psip_k - 2.0 * q_k
-		Smooth(psiavg_hv, 1.0, 2.0, T0)
+		T0 = Smooth(psiavg_hv, 1.0, 2.0)
 		nq_hv = 1.0 + gamhv / (sqrtpsip_k + sqrt(T0))
 		psi_k = psip_k - 2 * q_k
 	
@@ -2737,22 +3139,18 @@ function bsimbulk(param)
 		QIOV = NF * Wact * LOVERACC * 2 * nq_hv * Vt * T0 * q_k 
 	
 		# For symmetric device, adding contribution of the source side drift region
-	
 		if (HVCAPS == 1) 
 			vgfbdrift = -devsign * (Vg - Vs) - VFBOV 
 			vgfbdrift = vgfbdrift/Vt
-			PO_psip(vgfbdrift,gamhv,0,phibHV,psip_k)
-			BSIM_q(psip_k, phibHV, devsign * (Vs - Vb) / Vt, gamhv, q_k)           
-	
-			Smooth(psip_k, 1.0, 2.0, psipclamp_hv)
+			psip_k = PO_psip(vgfbdrift, gamhv, 0, phibHV)
+			q_k = BSIM_q(psip_k, phibHV, devsign * (Vs - Vb) / Vt, gamhv)           
+			psipclamp_hv = Smooth(psip_k, 1.0, 2.0)
 			sqrtpsip_k = sqrt(psipclamp_hv)
 			psiavg_hv = psip_k - 2.0 * q_k
-			Smooth(psiavg_hv, 1.0, 2.0, T0)
+			T0 = Smooth(psiavg_hv, 1.0, 2.0)
 			nq_hv = 1.0 + gamhv / (sqrtpsip_k + sqrt(T0))
 			psi_k = psip_k - 2 * q_k
-	
 			QBOVS = NF * Wact * LOVER * EPS0 * EPSROX / BSIMBULKTOXP * Vt * (vgfbdrift - psi_k - 2 * nq_hv * q_k)
-	
 			if (SLHV > 0) 
 				T1 = 1 + q_k / SLHV1 
 				T2 = SLHV * 1.9e-9 / T1
@@ -2760,13 +3158,10 @@ function bsimbulk(param)
 			else 
 				T0 = EPS0 * EPSROX / BSIMBULKTOXP
 			end
-	
-		   QIOVS = NF * Wact * LOVERACC * 2 * nq_hv * Vt * T0 * q_k 
+		   	QIOVS = NF * Wact * LOVERACC * 2 * nq_hv * Vt * T0 * q_k 
 		end
 	end 
 	
-	
-	Gcrg = 0.0
 	if (RGATEMOD > 1) 
 		idsovvds = ueff * Weff / Leff * Cox * qia
 		T9       = XRCRG2 * Vt
@@ -2792,10 +3187,10 @@ function bsimbulk(param)
 	if (HVMOD == 1 && IIMOD == 1) 
 		Ntot = DRII1 * ids/(NF * Weff * q  * VDRIFT_t )   
 		Nextra = Ntot/NDRIFTD - 1
-		Smooth(Nextra, 0, DELTAII, Nextra)
+		Nextra = Smooth(Nextra, 0, DELTAII)
 		Nextra = NDRIFTD * Nextra
 	
-		Smooth(devsign * (Vd - Vb) - Vdseff - DRII2, 0, 0.05, T2)
+		T2 = Smooth(devsign * (Vd - Vb) - Vdseff - DRII2, 0, 0.05)
 		T3 = 2.0 * q /(EPSRSUB * EPS0) * Nextra
 		T3 = T3 * T2                             
 	
@@ -2807,8 +3202,6 @@ function bsimbulk(param)
 		end
 		Iii = Iii + IsubDR
 	end
-	
-	ISUB = Iii * devsign
 	
 	# Gate currents, Ref: BSIM4
 	if ((IGCMOD != 0) || (IGBMOD != 0)) 
@@ -2894,15 +3287,8 @@ function bsimbulk(param)
 		igd      = igd_mult * Vgd_noswap * Vgd_eff * T4
 	end
 	end
-	IGS  = devsign * igs
-	IGD  = devsign * igd
-	IGB  = devsign * igb
-	IGCS = devsign * igcs
-	IGCD = devsign * igcd
 	
 	# GIDL and GISL currents, Ref: BSIM4
-	igisl = 0.0
-	igidl = 0.0
 	if (GIDLMOD != 0) 
 		T0 = epsratio * TOXE
 		# GIDL
@@ -2940,8 +3326,6 @@ function bsimbulk(param)
 		end
 		igisl = T6
 	end
-	IGIDL = devsign * NF * igidl
-	IGISL = devsign * NF * igisl
 	
 	# Junction currents and capacitances
 	# Source-side junction currents
@@ -3063,9 +3447,9 @@ function bsimbulk(param)
 	czbssw_p2  = 1.0 / (1.0 - MJSWS) * (1.0 - 0.05 * MJSWS * (1.0 + MJSWS) * czbssw_p1)
 	czbsswg_p1 = pow(0.1, -MJSWGS)
 	czbsswg_p2 = 1.0 / (1.0 - MJSWGS) * (1.0 - 0.05 * MJSWGS * (1.0 + MJSWGS) * czbsswg_p1)
-	JunCap(Czbs, Vbs_jct, PBS_t, MJS, czbs_p1, czbs_p2, Qbsj1)
-	JunCap(Czbssw, Vbs_jct, PBSWS_t, MJSWS, czbssw_p1, czbssw_p2, Qbsj2)
-	JunCap(Czbsswg, Vbs_jct, PBSWGS_t, MJSWGS, czbsswg_p1, czbsswg_p2, Qbsj3)
+	Qbsj1 = JunCap(Czbs, Vbs_jct, PBS_t, MJS, czbs_p1, czbs_p2)
+	Qbsj2 = JunCap(Czbssw, Vbs_jct, PBSWS_t, MJSWS, czbssw_p1, czbssw_p2)
+	Qbsj3 = JunCap(Czbsswg, Vbs_jct, PBSWGS_t, MJSWGS, czbsswg_p1, czbsswg_p2)
 	Qbsj = Qbsj1 + Qbsj2 + Qbsj3
 	
 	# Drain-to-bulk junction
@@ -3078,9 +3462,9 @@ function bsimbulk(param)
 	czbdsw_p2  = 1.0 / (1.0 - MJSWD) * (1.0 - 0.05 * MJSWD * (1.0 + MJSWD) * czbdsw_p1)
 	czbdswg_p1 = pow(0.1, -MJSWGD)
 	czbdswg_p2 = 1.0 / (1.0 - MJSWGD) * (1.0 - 0.05 * MJSWGD * (1.0 + MJSWGD) * czbdswg_p1)
-	JunCap(Czbd, Vbd_jct, PBD_t, MJD, czbd_p1, czbd_p2, Qbdj1)
-	JunCap(Czbdsw, Vbd_jct, PBSWD_t, MJSWD, czbdsw_p1, czbdsw_p2, Qbdj2)
-	JunCap(Czbdswg, Vbd_jct, PBSWGD_t, MJSWGD, czbdswg_p1, czbdswg_p2, Qbdj3)
+	Qbdj1 = JunCap(Czbd, Vbd_jct, PBD_t, MJD, czbd_p1, czbd_p2)
+	Qbdj2 = JunCap(Czbdsw, Vbd_jct, PBSWD_t, MJSWD, czbdsw_p1, czbdsw_p2)
+	Qbdj3 = JunCap(Czbdswg, Vbd_jct, PBSWGD_t, MJSWGD, czbdswg_p1, czbdswg_p2)
 	Qbdj = Qbdj1 + Qbdj2 + Qbdj3
 	
 	# Sub-surface leakage drain current
@@ -3131,13 +3515,13 @@ function bsimbulk(param)
 		LeffnoiH = Leff
 		vgfbh  = (Vg - VFB_i) / Vt
 		gam_h  = sqrt(2.0 * q * epssi * HNDEP / Vt) / Cox
-		phib_h = ln(HNDEP / ni)
+		phib_h = log(HNDEP / ni)
 	
 		# Pinch-Off potential for halo region
-		PO_psip(vgfbh, gam_h, 0.0, phib_h, psiph)
+		psiph = PO_psip(vgfbh, gam_h, 0.0, phib_h)
 	
 		# Normalized inversion charge at source end of halo MOSFET
-		BSIM_q(psiph, phib_h, vs, gam_h, qsh)
+		qsh = BSIM_q(psiph, phib_h, vs, gam_h)
 		nq_h = 1.0 + gam_h / (2.0 * sqrt(psiph))
 	
 		# Setting mobility of halo region equal to the mobility of the channel. In general, U0H < ueff
@@ -3235,7 +3619,6 @@ function bsimbulk(param)
 		else 
 			FNPowerAt1Hz = 0.0
 		end
-		I(di, si) <+ flicker_noise(sigvds*FNPowerAt1Hz, EF, "1overf")
 	end
 	
 	T0         = qia / Esatnoi / Leff
@@ -3269,21 +3652,21 @@ function bsimbulk(param)
 		DPD      = (NGATE_i > 0.0) ? (NDEPCV_i / NGATE_i) : 0.0
 	
 		# psip: pinch-off voltage
-		PO_psip(vgfbCV, gamCV, DPD, phibCV, psip)
+		psip = PO_psip(vgfbCV, gamCV, DPD, phibCV)
 	
 		# Normalized inversion charge at source end of channel
-		BSIM_q(psip, phibCV, vs, gamCV, qs)
-		Smooth(psip, 1.0, 2.0, psipclamp)
+		qs = BSIM_q(psip, phibCV, vs, gamCV)
+		psipclamp = Smooth(psip, 1.0, 2.0)
 		sqrtpsip = sqrt(psipclamp)
 	
 		# Source side surface potential
 		psiavg = psip - 2.0 * qs
-		Smooth(psiavg, 1.0, 2.0, T0)
+		T0 = Smooth(psiavg, 1.0, 2.0)
 		nq = 1.0 + gamCV / (sqrtpsip + sqrt(T0))
 	
 		# Drain saturation voltage
 		T0 = Vt * (vgfbCV - psip - 2.0 * qs * (nq - 1.0))
-		Smooth(T0, 0.0, 0.1, qbs)
+		qbs = Smooth(T0, 0.0, 0.1)
 	
 		# Source side qi and qb for Vdsat (normalized to Cox)
 		qis = 2.0 * nq * Vt * qs
@@ -3292,24 +3675,24 @@ function bsimbulk(param)
 		# Ref: BSIM4 mobility model
 		T3 = (UA_a + UC_a * Vbsx) * pow(Eeffs, EU_t)
 		T4 = 1.0 + T3
-		Smooth(T4, 1.0, 0.0015, Dmobs)
+		Dmobs = Smooth(T4, 1.0, 0.0015)
 		LambdaC_by2 = (U0_a / Dmobs) * Vt / (VSATCV_t * Lact)
 		qdsat       = LambdaC_by2 * (qs * qs + qs) / (1.0 + LambdaC_by2 * (1.0 + qs))
 		vdsatcv     = psip - 2.0 * phibCV - (2.0 * qdsat + lln((qdsat * 2.0 * nq * inv_gam) * ((qdsat * 2.0 * nq * inv_gam) + (gam / (nq - 1.0)))))
 		VdsatCV     = vdsatcv * Vt
 		
 		# Normalized charge qdeff at drain end of channel
-		Smooth(VdsatCV - Vs, 0.0, 1e-3, VdssatCV)
+		VdssatCV = Smooth(VdsatCV - Vs, 0.0, 1e-3)
 		VdssatCV     = VdssatCV / ABULK
 		T7     = pow(Vds / VdssatCV , 1.0 / DELTA_t)
 		T8     = pow(1.0 + T7, -DELTA_t)
 		Vdseff = Vds * T8
 		vdeff  = (Vdseff + Vs) * inv_Vt
-		BSIM_q(psip, phibCV, vdeff, gamCV, qdeff)
+		qdeff = BSIM_q(psip, phibCV, vdeff, gamCV)
 	
 		# Reevaluation of nq to include qdeff needed for gummel symmetry
 		psiavg = psip - qs - qdeff - 1.0
-		Smooth(psiavg, 1.0, 2.0, T0)
+		T0 = Smooth(psiavg, 1.0, 2.0)
 		T2 = sqrt(T0)
 		T3 = 1.0 + DPD + gamCV / (sqrtpsip + T2)
 		T4 = 0.5 + DPD * T2 * inv_gam
@@ -3319,16 +3702,16 @@ function bsimbulk(param)
 		# C-V expressions including velocity saturation and CLM
 		# Velocity saturation for C-V
 		T0  = Vt * (vgfbCV - psip - 2.0 * qs * (nq - 1.0))
-		Smooth(T0, 0.0, 0.1, qbs)
+		qbs = Smooth(T0, 0.0, 0.1)
 		T1  = Vt * (vgfbCV - psip - 2.0 * qdeff * (nq - 1.0))
-		Smooth(T1, 0.0, 0.1, qbd)
+		qbd = Smooth(T1, 0.0, 0.1)
 		qb  = 0.5 * (qbs + qbd)
 		qia = nq * Vt * (qs + qdeff)
 		Eeffm = EeffFactor * (qb + eta_mu * qia)
-	   PO_psip((vgfbCV + DELVFBACC * inv_Vt), gamCV, DPD, phibCV, psip)
+	    psip = PO_psip((vgfbCV + DELVFBACC * inv_Vt), gamCV, DPD, phibCV)
 		T3    = (UA_a + UC_a * Vbsx) * pow(Eeffm, EU_t)
 		T4    = 1.0 + T3
-		Smooth(T4, 1.0, 0.0015, Dmob)
+		Dmob = Smooth(T4, 1.0, 0.0015)
 		LambdaC = 2.0 * (U0_a / Dmob) * Vt / (VSATCV_t * Lact)
 		dps     = qs - qdeff
 		T1      = 2.0 * (LambdaC * dps) * (LambdaC * dps)
@@ -3354,8 +3737,8 @@ function bsimbulk(param)
 	DQSD2 = (qs - qdeff) * (qs - qdeff)
 	sis   = vgpqm + 2.0 * qs
 	sid   = vgpqm + 2.0 * qdeff
-	Smooth(sis, 0.0, 0.5, T1)
-	Smooth(sid, 0.0, 0.5, T2)
+	T1 = Smooth(sis, 0.0, 0.5)
+	T2 = Smooth(sid, 0.0, 0.5)
 	Temps = sqrt(0.25 + T1 * invgamg2)
 	Tempd = sqrt(0.25 + T2 * invgamg2)
 	T1 = sis / (1.0 + 2.0 * Temps)
@@ -3378,7 +3761,7 @@ function bsimbulk(param)
 	Qs  = Qi - Qd
 	
 	# Quantum mechanical effects
-	Smooth(Vt * Qb, 0.0, 0.1, qbaCV)
+	qbaCV = Smooth(Vt * Qb, 0.0, 0.1)
 	qiaCV      = Vt * (Qs + Qd)
 	T0         = (qiaCV + ETAQM * qbaCV) / QM0
 	T1         = 1.0 + pow(T0, 0.7 * BDOS)
@@ -3422,13 +3805,13 @@ function bsimbulk(param)
 		T1DEP         = sqrt(2.0 * epssi / (q * NDEPEDGE_i))
 		NFACTOREDGE_t = NFACTOREDGE_i * hypsmooth((1.0 + TNFACTOREDGE_i * (TRatio - 1.0)), 1e-3)
 		ETA0EDGE_t    = ETA0EDGE_i * (1.0 + TETA0EDGE_i * (TRatio - 1.0))
-		Smooth(Phist - Vbsx, 0.05, 0.1, PhistVbs)
+		PhistVbs = Smooth(Phist - Vbsx, 0.05, 0.1)
 		sqrtPhistVbs  = sqrt(PhistVbs)
 		Xdep          = T1DEP * sqrtPhistVbs
 		Cdep          = epssi / Xdep
 		cdsc          = CITEDGE_i + NFACTOREDGE_t + CDSCDEDGE_i * Vdsx - CDSCBEDGE_i * Vbsx
 		T1            = 1.0 + cdsc/Cox
-		Smooth(T1, 1.0, 0.05, n)
+		n = Smooth(T1, 1.0, 0.05)
 		nVt       = n * Vt
 		inv_nVt   = 1.0 / nVt
 		vg        = Vg * inv_nVt
@@ -3455,10 +3838,8 @@ function bsimbulk(param)
 		
 		# psip: pinch-off voltage
 		phib_n_edge  = phib_edge / n
-		PO_psip(vgfb, gam_edge, 0.0, phib_n_edge, psip)
-		
-		
-		BSIM_q(psip, phib_n_edge, vs, gam_edge, qs_edge)
+		psip = PO_psip(vgfb, gam_edge, 0.0, phib_n_edge)
+		qs_edge = BSIM_q(psip, phib_n_edge, vs, gam_edge)
 	
 		# Approximate pinch-off voltage
 		vdsatedge = 2.0 * nVt * qs_edge + 2.0 * nVt
@@ -3466,28 +3847,31 @@ function bsimbulk(param)
 		Vdsatedge = Vdsatedge + Vs
 	
 		# Vdssat clamped to avoid negative values during transient simulation
-		Smooth(Vdsatedge - Vs, 0.0, 1.0e-3, Vdssate)
+		Vdssate = Smooth(Vdsatedge - Vs, 0.0, 1.0e-3)
 		T7     = pow(Vds / Vdssate, 1.0 / DELTA_t)
 		T8     = pow(1.0 + T7, -DELTA_t)
 		Vdseff = Vds * T8
 		vdeff  = (Vdseff + Vs) * inv_nVt
-		BSIM_q(psip, phib_n_edge, vdeff, gam_edge, qdeff_edge)
+		qdeff_edge = BSIM_q(psip, phib_n_edge, vdeff, gam_edge)
 	
 		# Nq calculation for Edge FET
-		Smooth(psip, 1.0, 2.0, psipclamp)
+		psipclamp = Smooth(psip, 1.0, 2.0)
 		sqrtpsip = sqrt(psipclamp)
 		psiavg   = psip - qs_edge - qdeff_edge -1.0
-		Smooth(psiavg, 1.0, 2.0, T0)
+		T0 = Smooth(psiavg, 1.0, 2.0)
 		T2       = sqrt(T0)
 		nq_edge  = 1.0 + gam_edge / (sqrtpsip + T2)
 		ids_edge = 2.0 * NF * nq_edge * ueff * WEDGE / Leff * Cox * nVt * nVt * ((qs_edge - qdeff_edge) * (1.0 + qs_edge + qdeff_edge)) * Moc
 		ids      = ids_edge + ids
 	end
-
-
-
-	return BSIMBULKTOXP
+	return ids
 end
 
-yy=bsimbulk(param)
-print(yy)
+param = Dict(
+	"L" => 1e-6, 
+	"TOXP" => 1e-9,
+	"Temp" => 125.0
+	)
+
+kk=bsimbulk(param)
+println(kk)
