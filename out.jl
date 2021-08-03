@@ -3189,83 +3189,83 @@ function bsimbulk(param)
 		T1      = sqrt(Voxm * Voxm + 1.0e-4)
 		Voxmacc = 0.5 * (-Voxm + T1)
 		Voxminv = 0.5 * (Voxm + T1)
-	# Igbinv
-	if (IGBMOD != 0)
-		T1     = Voxm / NIGBACC_i / Vt
-		Vaux_Igbacc = NIGBACC_i * Vt * lln(1.0 + lexp(-T1))
-		T2     = AIGBACC_i - BIGBACC_i * Voxmacc
-		T3     = 1.0 + CIGBACC_i * Voxmacc
-		T4     = -7.45669e11 * TOXE * T2 * T3
-		T5     = lexp(T4)
-		T6     = 4.97232e-7
-		igbacc = NF * Weff * Leff * T6 * ToxRatio * Vg * Vaux_Igbacc * T5
-		igbacc = igbacc * igtemp
-		T1     = (Voxm - EIGBINV_i) / NIGBINV_i / Vt
-		Vaux_Igbinv = NIGBINV_i * Vt * lln(1.0 + lexp(T1))
-		T2     = AIGBINV_i - BIGBINV_i * Voxminv
-		T3     = 1.0 + CIGBINV_i * Voxminv
-		T4     = -9.82222e11 * TOXE * T2 * T3
-		T5     = lexp(T4)
-		T6     = 3.75956e-7
-		igbinv = NF * Weff * Leff * T6 * ToxRatio * Vg * Vaux_Igbinv * T5
-		igbinv = igbinv * igtemp
-		igb    = igbacc + igbinv
-	end
+		# Igbinv
+		if (IGBMOD != 0)
+			T1     = Voxm / NIGBACC_i / Vt
+			Vaux_Igbacc = NIGBACC_i * Vt * lln(1.0 + lexp(-T1))
+			T2     = AIGBACC_i - BIGBACC_i * Voxmacc
+			T3     = 1.0 + CIGBACC_i * Voxmacc
+			T4     = -7.45669e11 * TOXE * T2 * T3
+			T5     = lexp(T4)
+			T6     = 4.97232e-7
+			igbacc = NF * Weff * Leff * T6 * ToxRatio * Vg * Vaux_Igbacc * T5
+			igbacc = igbacc * igtemp
+			T1     = (Voxm - EIGBINV_i) / NIGBINV_i / Vt
+			Vaux_Igbinv = NIGBINV_i * Vt * lln(1.0 + lexp(T1))
+			T2     = AIGBINV_i - BIGBINV_i * Voxminv
+			T3     = 1.0 + CIGBINV_i * Voxminv
+			T4     = -9.82222e11 * TOXE * T2 * T3
+			T5     = lexp(T4)
+			T6     = 3.75956e-7
+			igbinv = NF * Weff * Leff * T6 * ToxRatio * Vg * Vaux_Igbinv * T5
+			igbinv = igbinv * igtemp
+			igb    = igbacc + igbinv
+		end
 
-	if (IGCMOD != 0)
-		# Igcinv
-		T1   = AIGC_i - BIGC_i * Voxminv
-		T2   = 1.0 + CIGC_i * Voxminv
-		T3   = Bechvb * T1 * T2
-		T4   = nq * nVt * (qs + qdeff) * lexp(T3)
-		igc0 = NF * Aechvb * T4 * (Vg + 0.5 * Vdsx - 0.5 * (Vs + Vd)) * igtemp
-		# Gate-current partitioning
-		Vdseffx = sqrt(Vdseff * Vdseff + 0.01) - 0.1
-		T1      = PIGCD_i * Vdseffx
-		T1_exp  = lexp(-T1)
-		T3      = T1 + T1_exp -1.0 + 1.0e-4
-		T4      = 1.0 - (T1 + 1.0) * T1_exp + 1.0e-4
-		T5      = T1 * T1 + 2.0e-4
-		if (sigvds > 0)
-			igcd = igc0 * T4 / T5
-			igcs = igc0 * T3 / T5
-		else
-			igcs = igc0 * T4 / T5
-			igcd = igc0 * T3 / T5
-		end
-		# Igs
-		T2      = Vgs_noswap - Vfbsdr
-		Vgs_eff = sqrt(T2 * T2 + 1.0e-4)
-		if (IGCLAMP == 1)
-			T1 = hypsmooth((AIGS_i - BIGS_i * Vgs_eff), 1.0e-6)
-			if (CIGS_i < 0.01)
-				CIGS_i = 0.01
+		if (IGCMOD != 0)
+			# Igcinv
+			T1   = AIGC_i - BIGC_i * Voxminv
+			T2   = 1.0 + CIGC_i * Voxminv
+			T3   = Bechvb * T1 * T2
+			T4   = nq * nVt * (qs + qdeff) * lexp(T3)
+			igc0 = NF * Aechvb * T4 * (Vg + 0.5 * Vdsx - 0.5 * (Vs + Vd)) * igtemp
+			# Gate-current partitioning
+			Vdseffx = sqrt(Vdseff * Vdseff + 0.01) - 0.1
+			T1      = PIGCD_i * Vdseffx
+			T1_exp  = lexp(-T1)
+			T3      = T1 + T1_exp -1.0 + 1.0e-4
+			T4      = 1.0 - (T1 + 1.0) * T1_exp + 1.0e-4
+			T5      = T1 * T1 + 2.0e-4
+			if (sigvds > 0)
+				igcd = igc0 * T4 / T5
+				igcs = igc0 * T3 / T5
+			else
+				igcs = igc0 * T4 / T5
+				igcd = igc0 * T3 / T5
 			end
-		else
-			T1 = AIGS_i - BIGS_i * Vgs_eff
-		end
-		T2       = 1.0 + CIGS_i * Vgs_eff
-		T3       = BechvbEdge * T1 * T2
-		T4       = lexp(T3)
-		igs_mult = igtemp * NF * AechvbEdge * DLCIG_i
-		igs      = igs_mult * Vgs_noswap * Vgs_eff * T4
-		# Igd
-		T2      = Vgd_noswap - Vfbsdr
-		Vgd_eff = sqrt(T2 * T2 + 1.0e-4)
-		if (IGCLAMP == 1)
-			T1 = hypsmooth((AIGD_i - BIGD_i * Vgd_eff), 1.0e-6)
-			if (CIGD_i < 0.01)
-				CIGD_i = 0.01
+			# Igs
+			T2      = Vgs_noswap - Vfbsdr
+			Vgs_eff = sqrt(T2 * T2 + 1.0e-4)
+			if (IGCLAMP == 1)
+				T1 = hypsmooth((AIGS_i - BIGS_i * Vgs_eff), 1.0e-6)
+				if (CIGS_i < 0.01)
+					CIGS_i = 0.01
+				end
+			else
+				T1 = AIGS_i - BIGS_i * Vgs_eff
 			end
-		else
-			T1 = AIGD_i - BIGD_i * Vgd_eff
+			T2       = 1.0 + CIGS_i * Vgs_eff
+			T3       = BechvbEdge * T1 * T2
+			T4       = lexp(T3)
+			igs_mult = igtemp * NF * AechvbEdge * DLCIG_i
+			igs      = igs_mult * Vgs_noswap * Vgs_eff * T4
+			# Igd
+			T2      = Vgd_noswap - Vfbsdr
+			Vgd_eff = sqrt(T2 * T2 + 1.0e-4)
+			if (IGCLAMP == 1)
+				T1 = hypsmooth((AIGD_i - BIGD_i * Vgd_eff), 1.0e-6)
+				if (CIGD_i < 0.01)
+					CIGD_i = 0.01
+				end
+			else
+				T1 = AIGD_i - BIGD_i * Vgd_eff
+			end
+			T2       = 1.0 + CIGD_i * Vgd_eff
+			T3       = BechvbEdge * T1 * T2
+			T4       = lexp(T3)
+			igd_mult = igtemp * NF * AechvbEdge * DLCIGD_i
+			igd      = igd_mult * Vgd_noswap * Vgd_eff * T4
 		end
-		T2       = 1.0 + CIGD_i * Vgd_eff
-		T3       = BechvbEdge * T1 * T2
-		T4       = lexp(T3)
-		igd_mult = igtemp * NF * AechvbEdge * DLCIGD_i
-		igd      = igd_mult * Vgd_noswap * Vgd_eff * T4
-	end
 	end
 
 	# GIDL and GISL currents, Ref: BSIM4
@@ -3456,7 +3456,6 @@ function bsimbulk(param)
 		SSL1_NT  = SSL1 * T2 * T1
 		PHIB_SSL = SSL3 * tanh(lexp(devsign * SSL4 * ((Vg - Vb) - VTH - (Vs - Vb))))
 		Issl     = sigvds * NF * Weff * SSL0_NT * lexp(T3) * lexp(-SSL1_NT * Leff) * lexp(PHIB_SSL / Vt) * (lexp(SSL2 * Vdsx / Vt) - 1.0)
-		I(di, si) <+ devsign * Issl
 	end
 
 	# Harshit's new flicker noise model. Ref: H. Agarwal et. al., IEEE J-EDS, vol. 3, no. 4, April 2015.
@@ -3569,7 +3568,6 @@ function bsimbulk(param)
 		end
 		# Overall noise
 		FNPowerAt1Hz = FNPowerAt1Hz_ch * CF_ch + FNPowerAt1Hz_h * CF_h
-		I(di, si) <+ flicker_noise(sigvds*FNPowerAt1Hz, EF, "1overf")
 	else
 		# Parameter checking
 		if (LINTNOI >= Leff/2.0)
